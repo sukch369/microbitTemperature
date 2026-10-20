@@ -1,4 +1,9 @@
+<<<<<<< HEAD
 # 마이크로비트 온도 탐구실 · 교사용 GitHub Pages v1.2
+=======
+# 마이크로비트 6모둠 온도 탐구실
+https://sukch369.github.io/microbitTemperature/
+>>>>>>> 2c6531de85838c1aa42fa231fff4185c05357252
 
 버전: **v1.2 (2026-10-20)**  
 기반: v1.1 교사용 수집 프로그램. **기존 IndexedDB 실험 기록과 Google Apps Script 저장 API를 그대로 사용합니다.**
