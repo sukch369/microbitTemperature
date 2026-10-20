@@ -152,7 +152,8 @@
       for(const v of parts){const td=document.createElement('td');td.textContent=v;tr.append(td);}tbody.append(tr);
     }
   }
-  // 전체 수집 기간을 표시합니다. y축은 정수 눈금만 사용합니다.
+  // 전체 수집 기간 표시. MISS로 비어 있는 구간은 점선으로 이어 추세를 보여 줍니다.
+  // 온도가 동일한 두 센서는 표시 위치만 미세하게 분리하며 원본 값은 변경하지 않습니다.
   function chart(canvasId, records, group){
     const canvas=$(canvasId),ctx=canvas.getContext('2d');
     const width=Math.max(canvas.clientWidth,200),height=Math.max(canvas.clientHeight,200);
@@ -202,29 +203,71 @@
       const tt=tmin+(tmax-tmin)*i/tickCount;
       ctx.fillText(stamp(tt),x(tt),height-pad.bottom+12);
     }
+    // 동일 온도값으로 두 센서의 궤적이 겹치면 화면에서만 약 2.5px씩 위/아래로 분리합니다.
+    // 데이터가 가진 온도와 시간 좌표(정수 세로축, 원본 저장값)는 변경하지 않습니다.
+    const series = {
+      A: pts.filter(r=>r.side==='A'),
+      B: pts.filter(r=>r.side==='B')
+    };
+    const tempTimes = {A:new Map(),B:new Map()};
+    for(const side of ['A','B']){
+      for(const record of series[side]){
+        const temp = Number(record.temperature);
+        if(!tempTimes[side].has(temp))tempTimes[side].set(temp,[]);
+        tempTimes[side].get(temp).push(Date.parse(record.measuredAt));
+      }
+    }
+    const OVERLAP_WINDOW_MS=15000; // 같은 측정 회차(약 20초 주기)의 서로 다른 수신 시각 허용
+    function nearestMatch(times,target){
+      if(!times || !times.length)return false;
+      let left=0,right=times.length;
+      while(left<right){
+        const mid=(left+right)>>1;
+        if(times[mid]<target)left=mid+1;
+        else right=mid;
+      }
+      return (left<times.length && Math.abs(times[left]-target)<=OVERLAP_WINDOW_MS) ||
+             (left>0 && Math.abs(times[left-1]-target)<=OVERLAP_WINDOW_MS);
+    }
+    function plottedPoint(record,side){
+      const time=Date.parse(record.measuredAt),temp=Number(record.temperature);
+      const opposite=side==='A'?'B':'A';
+      const overlap=nearestMatch(tempTimes[opposite].get(temp),time);
+      return {time, px:x(time), py:y(temp)+(overlap?(side==='A'?-2.5:2.5):0)};
+    }
     for(const [side,color] of [['A','#098e95'],['B','#e58b3c']]){
-      const subset=pts.filter(r=>r.side===side);
+      const subset=series[side];
       if(!subset.length)continue;
       ctx.save();ctx.beginPath();ctx.rect(pad.left-2,pad.top-3,plotW+4,plotH+6);ctx.clip();
-      ctx.strokeStyle=color;ctx.lineWidth=2.6;ctx.lineJoin='round';
+      ctx.strokeStyle=color;ctx.lineWidth=2.6;ctx.lineJoin='round';ctx.lineCap='round';
       ctx.beginPath();
-      let previousTime=null;
+      let previous=null;
       for(const r of subset){
-        const time=Date.parse(r.measuredAt),px=x(time),py=y(Number(r.temperature));
-        // 20초 기본 수집 주기에서 누락된 1회 이상의 구간은 잇지 않습니다.
-        if(previousTime===null || time-previousTime>35000)ctx.moveTo(px,py);
-        else ctx.lineTo(px,py);
-        previousTime=time;
+        const point=plottedPoint(r,side);
+        if(previous===null){ctx.moveTo(point.px,point.py);}
+        else if(point.time-previous.time>35000){
+          // 정상 수신된 두 값만 연결하되, 중간 MISS 구간임을 점선으로 표시합니다.
+          ctx.stroke();
+          ctx.setLineDash([7,5]);
+          ctx.beginPath();ctx.moveTo(previous.px,previous.py);ctx.lineTo(point.px,point.py);ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.beginPath();ctx.moveTo(point.px,point.py);
+        } else {
+          ctx.lineTo(point.px,point.py);
+        }
+        previous=point;
       }
       ctx.stroke();
-      // 긴 실험은 점 표식 수만 제한하고 선의 전체 기간 데이터는 모두 표시합니다.
+      // 긴 실험에서는 점 표식만 간소화하고 전체 기간의 선은 모두 그립니다.
       const markEvery=Math.max(1,Math.ceil(subset.length/300));
       for(let i=0;i<subset.length;i+=markEvery){
-        const r=subset[i];ctx.fillStyle=color;ctx.beginPath();
-        ctx.arc(x(Date.parse(r.measuredAt)),y(Number(r.temperature)),2.2,0,Math.PI*2);ctx.fill();
+        const pt=plottedPoint(subset[i],side);
+        ctx.fillStyle=color;ctx.beginPath();
+        ctx.arc(pt.px,pt.py,2.2,0,Math.PI*2);ctx.fill();
       }
-      const last=subset[subset.length-1];ctx.fillStyle=color;ctx.beginPath();
-      ctx.arc(x(Date.parse(last.measuredAt)),y(Number(last.temperature)),2.8,0,Math.PI*2);ctx.fill();
+      const last=plottedPoint(subset[subset.length-1],side);
+      ctx.fillStyle=color;ctx.beginPath();
+      ctx.arc(last.px,last.py,2.8,0,Math.PI*2);ctx.fill();
       ctx.restore();
     }
   }

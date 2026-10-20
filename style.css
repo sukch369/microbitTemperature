@@ -26,3 +26,6 @@
 .quality-copy{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;font-weight:normal}.quality-copy strong{font-size:13px}.quality-help{font-size:12px;line-height:1.65}
 @media(max-width:850px){.manage-content .stat-row{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:600px){.header-inner{display:flex;align-items:center}.header-label{font-size:10px;padding:7px}.brand-symbol{width:39px;height:39px;font-size:30px}.brand strong{font-size:14px}.hero-compact h1{font-size:21px}.monitor-panel .sensor strong{font-size:20px}.chart-panel .chart-wrap{height:295px}.manage-disclosure>summary{flex-wrap:wrap;padding:15px}.manage-summary{flex-basis:100%;order:3}.manage-caret{margin-left:auto}.manage-content{padding:0 8px 8px}.manage-content .stat-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* v1.2.1 graph guidance without crowding classroom display */
+.chart-note{margin:7px 0 0;color:var(--muted);font-size:11px;line-height:1.6}.chart-note strong{color:#395766}
