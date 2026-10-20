@@ -1,7 +1,7 @@
 /* micro:bit classroom dashboard (static GitHub Pages client) */
 (() => {
   "use strict";
-  const C = Object.assign({gasUrl:"",baudRate:115200,syncIntervalMs:30000,viewerIntervalMs:20000,temperatureJumpLimitC:10,temperatureJumpWindowMs:180000,temperatureConfirmToleranceC:3}, window.APP_CONFIG || {});
+  const C = Object.assign({gasUrl:"",studentViewerUrl:"",baudRate:115200,syncIntervalMs:30000,viewerIntervalMs:20000,temperatureJumpLimitC:10,temperatureJumpWindowMs:180000,temperatureConfirmToleranceC:3}, window.APP_CONFIG || {});
   const $ = id => document.getElementById(id);
   const DEVICES = Array.from({length:6}, (_,i) => [String(i+1)+'A',String(i+1)+'B']).flat();
   const STATE = { db:null, session:null, localRecords:[], localGroup:1, cloudGroup:1, cloudData:[], cloudSummary:{}, port:null, reader:null, reading:false, syncing:false, refreshing:false, refreshAgain:false, lastReceive:0, misses:0, renderScheduled:false, jsonpSeq:0, qualityProtection:true, lastGood:{}, pendingSuspect:{}, serialLines:[], anomalyCount:0 };
@@ -111,10 +111,47 @@
     $('active-experiment-name').textContent=STATE.session.name;
     announce('실험 정보를 저장했습니다.');
   }
+  function getStudentLink(){
+    const configuredUrl = String(C.studentViewerUrl || '').trim();
+    if(!configuredUrl)throw Error('config.js에서 studentViewerUrl을 먼저 설정해 주세요.');
+    let url;
+    try{url=new URL(configuredUrl);}catch(_){throw Error('학생용 Apps Script URL 형식이 올바르지 않습니다.');}
+    // 학생용 전용 Google Apps Script 배포 주소만 사용합니다.
+    if(url.protocol !== 'https:' || url.hostname !== 'script.google.com' ||
+       !/^\/macros\/s\/[^/]+\/exec\/?$/.test(url.pathname)){
+      throw Error('studentViewerUrl에는 학생용 Apps Script의 HTTPS /exec 배포 주소를 입력해 주세요.');
+    }
+    if(!STATE.session?.id)throw Error('현재 선택된 실험이 없습니다.');
+    url.searchParams.set('session', STATE.session.id);
+    return url.toString();
+  }
   async function copyUrl(){
-    await commitSession();
-    await navigator.clipboard.writeText(STATE.session.id);
-    announce('실험 ID를 복사했습니다. 학생용 Apps Script 전용 공유 링크는 다음 단계에서 연결됩니다.');
+    // 클릭 사용자 제스처가 유지될 때 즉시 복사 (IndexedDB await 후에는 일부 브라우저에서 권한 거부 가능).
+    const url = getStudentLink();
+    await navigator.clipboard.writeText(url);
+    const feedback=$('qr-feedback');if(feedback && $('student-qr-dialog')?.open)feedback.textContent='학생용 링크가 복사되었습니다.';
+    announce('현재 실험의 학생용 조회 링크를 복사했습니다.');
+  }
+  function openStudentQR(){
+    const url = getStudentLink();
+    if(!window.LocalQRCode?.draw)throw Error('QR 코드 모듈을 불러오지 못했습니다. qr-local.js 파일을 확인하세요.');
+    const canvas=$('qr-canvas');
+    window.LocalQRCode.draw(canvas,url);
+    $('qr-feedback').textContent='';
+    $('qr-session-name').textContent=STATE.session.name;
+    const preview=$('qr-link-preview');preview.textContent=url;preview.href=url;
+    const dialog=$('student-qr-dialog');
+    if(!dialog.open)dialog.showModal();
+  }
+  function saveQRImage(){
+    const canvas=$('qr-canvas');
+    if(!canvas.width)throw Error('먼저 QR 코드를 생성해 주세요.');
+    const a=document.createElement('a');
+    a.href=canvas.toDataURL('image/png');
+    a.download=`학생용_온도탐구_QR_${STATE.session.id.slice(0,8)}.png`;
+    document.body.appendChild(a);a.click();a.remove();
+    $('qr-feedback').textContent='QR 이미지 PNG 저장을 시작했습니다.';
+    announce('QR 코드 PNG 이미지 저장을 시작했습니다.');
   }
   function currentView(){return $('collect-view').classList.contains('hidden')?'share':'collect';}
   function showView(view, updateUrl=true){
@@ -482,6 +519,14 @@
     $('disconnect').addEventListener('click',()=>disconnectSerial().catch(failure));
     $('sync-now').addEventListener('click',()=>syncNow().catch(failure));
     $('copy-link').addEventListener('click',()=>copyUrl().catch(failure));
+    $('show-qr').addEventListener('click',()=>{try{openStudentQR();}catch(err){failure(err);}});
+    $('qr-copy').addEventListener('click',()=>copyUrl().catch(failure));
+    $('qr-download').addEventListener('click',()=>{try{saveQRImage();}catch(err){failure(err);}});
+    $('qr-close').addEventListener('click',()=>$('student-qr-dialog').close());
+    $('qr-close-bottom').addEventListener('click',()=>$('student-qr-dialog').close());
+    $('student-qr-dialog').addEventListener('click',e=>{
+      if(e.target === $('student-qr-dialog'))$('student-qr-dialog').close();
+    });
     $('export-csv').addEventListener('click',exportCSV);
     $('storage-persist').addEventListener('click',async()=>{
       if(!navigator.storage?.persist){announce('이 브라우저는 영구 저장 요청 기능을 지원하지 않습니다.',true);return;}

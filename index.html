@@ -6,9 +6,10 @@
   <meta name="theme-color" content="#132d40">
   <meta name="description" content="마이크로비트 6모둠 온도 측정과 공유 대시보드">
   <title>마이크로비트 온도 탐구실</title>
-  <link rel="stylesheet" href="./style.css?v=1.2.1">
-  <script src="./config.js"></script>
-  <script defer src="./app.js?v=1.2.1"></script>
+  <link rel="stylesheet" href="./style.css?v=1.2.2">
+  <script src="./config.js?v=1.2.2"></script>
+  <script defer src="./qr-local.js?v=1.2.2"></script>
+  <script defer src="./app.js?v=1.2.2"></script>
 </head>
 <body>
   <header class="site-header">
@@ -51,9 +52,10 @@
               <button type="button" class="btn primary" id="connect">USB 시리얼 연결</button>
               <button type="button" class="btn secondary" id="disconnect" disabled>연결 해제</button>
               <button type="button" class="btn secondary" id="save-details">실험 정보 저장</button>
-              <button type="button" class="btn secondary" id="copy-link">실험 ID 복사</button>
+              <button type="button" class="btn secondary" id="copy-link">학생용 링크 복사</button>
+              <button type="button" class="btn secondary" id="show-qr">QR 코드 생성</button>
             </div>
-            <p class="hint">PC 크롬/엣지에서 사용하세요. MakeCode 편집기 및 시리얼 콘솔의 WebUSB 연결을 해제한 후 교사용 마이크로비트를 선택하세요. 학생용 Apps Script 공유 링크 기능은 다음 단계에서 연결됩니다.</p>
+            <p class="hint">PC 크롬/엣지에서 사용하세요. MakeCode 편집기 및 시리얼 콘솔의 WebUSB 연결을 해제한 후 교사용 마이크로비트를 선택하세요. 학생용 링크 및 QR 코드는 현재 선택한 실험에만 연결됩니다. 측정 결과는 구글 스프레드시트 동기화 이후 학생용 사이트에 표시됩니다.</p>
           </section>
           <section class="stat-row" aria-label="데이터 저장 현황">
             <div class="stat"><span>로컬 측정값</span><strong id="stat-total">0</strong></div>
@@ -81,6 +83,22 @@
       <section class="panel"><div class="panel-head"><h2>최근 공유 데이터</h2><span class="muted small">선택한 모둠</span></div><div class="table-scroll"><table><thead><tr><th>수신 시각</th><th>장치</th><th>온도(°C)</th></tr></thead><tbody id="cloud-history"><tr><td colspan="3">조회된 데이터가 없습니다.</td></tr></tbody></table></div></section>
     </section>
   </main>
-  <footer class="container footer">마이크로비트 온도 탐구실 · Web Serial / IndexedDB / Google Apps Script <span id="footer-version">v1.2.1</span></footer>
+  <dialog id="student-qr-dialog" class="qr-dialog" aria-labelledby="qr-dialog-title" aria-describedby="qr-dialog-description">
+    <div class="qr-dialog-header">
+      <div><h2 id="qr-dialog-title">학생용 데이터 조회 QR 코드</h2>
+        <p id="qr-dialog-description" class="muted small">스캔하면 현재 선택한 실험의 학생용 조회 화면으로 이동합니다.</p></div>
+      <button type="button" class="qr-close" id="qr-close" aria-label="팝업 닫기">×</button>
+    </div>
+    <div class="qr-canvas-frame"><canvas id="qr-canvas" role="img" aria-label="학생용 조회 페이지 QR 코드"></canvas></div>
+    <p class="qr-session-name" id="qr-session-name"></p>
+    <a id="qr-link-preview" class="qr-link-preview" target="_blank" rel="noopener noreferrer"></a>
+    <p id="qr-feedback" class="qr-feedback" role="status" aria-live="polite"></p>
+    <div class="actions qr-actions">
+      <button type="button" class="btn primary" id="qr-copy">학생용 링크 복사</button>
+      <button type="button" class="btn secondary" id="qr-download">QR 이미지 저장</button>
+      <button type="button" class="btn secondary" id="qr-close-bottom">닫기</button>
+    </div>
+  </dialog>
+  <footer class="container footer">마이크로비트 온도 탐구실 · Web Serial / IndexedDB / Google Apps Script <span id="footer-version">v1.2.2</span></footer>
 </body>
 </html>

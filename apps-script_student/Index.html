@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <base target="_top">
+  <?!= include_('Styles'); ?>
+</head>
+<body data-session="<?= sessionId ?>" data-group="<?= initialGroup ?>">
+  <main class="layout">
+    <header class="masthead">
+      <div class="eyebrow">MICRO:BIT · TEMPERATURE EXPLORER</div>
+      <div class="head-flex">
+        <div>
+          <h1>마이크로비트 온도 탐구실</h1>
+          <p class="sub">우리 모둠과 다른 모둠의 온도 변화를 비교해 보세요.</p>
+        </div>
+        <div id="connection-status" class="live-state" role="status"><span class="pulse"></span><span id="status-text">조회 준비 중</span></div>
+      </div>
+      <div class="meta-line">
+        <span><strong>실험</strong> <span id="experiment-name">공유 링크 확인 중</span></span>
+        <span class="meta-sep">•</span>
+        <span><strong>위치</strong> <span id="class-label">—</span></span>
+        <span class="meta-sep">•</span>
+        <span><strong>마지막 수신</strong> <span id="last-measured-at">—</span></span>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="overview-title">
+      <div class="section-head">
+        <div>
+          <h2 id="overview-title">모둠별 최근 온도</h2>
+          <p class="helper">모둠을 선택하면 아래 그래프가 변경됩니다.</p>
+        </div>
+        <div class="updated">자동 새로고침 <strong>20초</strong></div>
+      </div>
+      <div class="group-grid" id="group-grid" aria-live="polite"></div>
+    </section>
+
+    <section class="section chart-section" aria-labelledby="chart-title">
+      <div class="section-head chart-head">
+        <div>
+          <h2 id="chart-title"><span id="selected-group-title">1</span>모둠 온도 변화</h2>
+          <p class="helper">실험 첫 측정부터 최근 측정까지 · 세로축 정수 온도(℃)</p>
+        </div>
+        <div class="legend" aria-label="그래프 범례">
+          <span><i class="legend-dot teal"></i>A</span>
+          <span><i class="legend-dot orange"></i>B</span>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="temperature-chart" role="img" aria-label="선택한 모둠의 A와 B 온도 변화 그래프"></canvas>
+        <div class="chart-empty" id="chart-empty">측정 데이터를 불러오는 중입니다.</div>
+      </div>
+      <p class="chart-hint">점선은 중간 측정값이 없는 구간을 연결한 것입니다. 두 온도가 같으면 선을 조금 나누어 표시합니다. 실제 측정값은 변경되지 않습니다.</p>
+      <div class="summary-line" id="summary-line" aria-live="polite">—</div>
+    </section>
+
+    <div id="feedback" class="feedback" role="status" aria-live="polite"></div>
+    <footer class="footer">읽기 전용 · 데이터는 교사용 시스템에서 수집하고 구글 스프레드시트에서 조회합니다.<span>Student Viewer v1.0</span></footer>
+  </main>
+  <?!= include_('Script'); ?>
+</body>
+</html>

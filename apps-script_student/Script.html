@@ -1,0 +1,235 @@
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const SESSION_ID = document.body.dataset.session || '';
+  const DEFAULT_GROUP = Number(document.body.dataset.group || 1);
+  const POLL_MS = 20000;
+  const GAP_MS = 35000; // 누락된 측정 주기를 점선으로 보여줌
+  const COLORS = {A:'#0b929b', B:'#e58638'};
+  const DEVICES = Array.from({length:6}, (_,i) => [String(i+1)+'A',String(i+1)+'B']).flat();
+  const state = {
+    group:DEFAULT_GROUP, nextRow:2, rows:new Map(), byDevice:{}, latest:{},
+    name:'', classLabel:'', busy:false, checkedAt:0, hasEverLoaded:false,
+    generation:0, timer:null
+  };
+  for (const id of DEVICES) state.byDevice[id] = [];
+
+  const rounded = (v) => Number.isFinite(Number(v)) ? String(Math.round(Number(v))) : '—';
+  const fmtTime = (v, seconds=true) => {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour12:false,
+      hour:'2-digit',minute:'2-digit',...(seconds?{second:'2-digit'}:{})});
+  };
+  const fmtCount = (n) => n.toLocaleString('ko-KR');
+  function setStatus(message, mode='loading') {
+    $('status-text').textContent=message;
+    $('connection-status').classList.toggle('ready',mode==='ready');
+    $('connection-status').classList.toggle('error',mode==='error');
+  }
+  function info(message, error=false) {
+    $('feedback').textContent=message;
+    $('feedback').classList.toggle('error',error);
+  }
+  function callServer(method, ...args) {
+    return new Promise((resolve,reject)=>{
+      if (!window.google || !google.script || !google.script.run) {
+        reject(new Error('Apps Script 배포 페이지에서만 데이터를 조회할 수 있습니다.'));
+        return;
+      }
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[method](...args);
+    });
+  }
+  function collect(item) {
+    if (!item || !DEVICES.includes(item.deviceId) || !Number.isFinite(Number(item.temperature))) return;
+    const row=Number(item.row);
+    if (!Number.isInteger(row) || state.rows.has(row)) return;
+    const t=new Date(item.measuredAt).getTime();
+    if (!Number.isFinite(t)) return;
+    const entry={row, deviceId:item.deviceId, temperature:Number(item.temperature),measuredAt:item.measuredAt,t};
+    state.rows.set(row,entry);
+    state.byDevice[item.deviceId].push(entry);
+    const previous=state.latest[item.deviceId];
+    if (!previous || entry.t>=previous.t) state.latest[item.deviceId]=entry;
+    if (item.sessionName) state.name=item.sessionName;
+    if (item.classLabel) state.classLabel=item.classLabel;
+  }
+  function drawCards() {
+    const wrapper=$('group-grid');
+    wrapper.replaceChildren();
+    for(let group=1;group<=6;group++) {
+      const a=state.latest[group+'A'];
+      const b=state.latest[group+'B'];
+      const last=[a?.t,b?.t].filter(Number.isFinite);
+      const lastTime=last.length?Math.max(...last):null;
+      const button=document.createElement('button');
+      button.type='button';
+      button.className='group-card'+(group===state.group?' selected':'');
+      button.setAttribute('aria-pressed',String(group===state.group));
+      button.setAttribute('aria-label',`${group}모둠 상세 그래프 보기`);
+      const top=document.createElement('div');top.className='card-top';
+      const name=document.createElement('strong');name.textContent=`${group}모둠`;
+      const small=document.createElement('small');
+      small.textContent=lastTime?`${fmtTime(lastTime)} 수신`:'수신 전';
+      top.append(name,small);
+      const vals=document.createElement('div');vals.className='card-values';
+      for(const [side,value] of [['A',a],['B',b]]) {
+        const block=document.createElement('div');block.className='reading';
+        const label=document.createElement('span');label.className='side';label.textContent=side;
+        const number=document.createElement('span');number.className='temp'+(value?'':' missing');
+        number.textContent=value?rounded(value.temperature):'—';
+        const unit=document.createElement('span');unit.className='unit';unit.textContent='℃';
+        block.append(label,number,unit);vals.append(block);
+      }
+      button.append(top,vals);
+      button.addEventListener('click',()=>{
+        state.group=group;
+        drawCards();drawChart();
+      });
+      wrapper.append(button);
+    }
+  }
+  function allSorted(deviceId) {
+    return [...state.byDevice[deviceId]].sort((a,b)=>a.t-b.t||a.row-b.row);
+  }
+  function drawChart(){
+    $('selected-group-title').textContent=String(state.group);
+    const a=allSorted(`${state.group}A`), b=allSorted(`${state.group}B`);
+    const all=[...a,...b];
+    const canvas=$('temperature-chart');
+    const box=canvas.getBoundingClientRect();
+    const width=Math.max(1,Math.round(box.width)),height=Math.max(1,Math.round(box.height));
+    const dpr=Math.min(3,window.devicePixelRatio||1);
+    canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);
+    const ctx=canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,width,height);
+    const noData = $('chart-empty');
+    const summary = $('summary-line');
+    if(!all.length){
+      noData.classList.remove('hidden');
+      noData.textContent=state.busy?'측정 데이터를 불러오는 중입니다.':'선택한 모둠의 측정값이 아직 없습니다.';
+      summary.textContent='';
+      return;
+    }
+    noData.classList.add('hidden');
+    let tMin=Infinity,tMax=-Infinity,vMin=Infinity,vMax=-Infinity;
+    for(const item of all) {
+      tMin=Math.min(tMin,item.t);tMax=Math.max(tMax,item.t);
+      vMin=Math.min(vMin,item.temperature);vMax=Math.max(vMax,item.temperature);
+    }
+    const delta=Math.max(2,vMax-vMin+2);
+    const step=Math.max(1,Math.ceil(delta/6));
+    const low=Math.floor((vMin-1)/step)*step;
+    const high=Math.ceil((vMax+1)/step)*step;
+    const pad={left:width<460?38:53,right:width<460?14:23,top:20,bottom:43};
+    const plotW=Math.max(10,width-pad.left-pad.right);
+    const plotH=Math.max(10,height-pad.top-pad.bottom);
+    const y=v=>pad.top+(high-v)/(high-low)*plotH;
+    const x=t=>pad.left+(t-tMin)/(tMax-tMin||1)*plotW;
+    ctx.font='11px Arial, sans-serif';
+    ctx.lineWidth=1;ctx.textBaseline='middle';
+    for(let tick=low;tick<=high;tick+=step){
+      const py=y(tick);ctx.strokeStyle='#e0eaee';ctx.beginPath();ctx.moveTo(pad.left,py);ctx.lineTo(width-pad.right,py);ctx.stroke();
+      ctx.fillStyle='#6b8290';ctx.textAlign='right';ctx.fillText(String(tick),pad.left-8,py);
+    }
+    const tickCount=width<460?3:5;
+    ctx.textAlign='center';ctx.textBaseline='top';ctx.fillStyle='#6b8290';
+    for(let i=0;i<tickCount;i++){
+      const t=tMin+(tMax-tMin)*i/(tickCount-1);
+      const px=x(t);
+      const label=fmtTime(t, true);
+      ctx.fillText(label,px, height-pad.bottom+11);
+    }
+    // When both probes have the same observed temperature within 15 seconds,
+    // split only the drawn pixel position; do not modify the measured temperature.
+    function displayY(item,side){
+      const other=side==='A'?b:a;
+      let left=0,right=other.length;
+      const earliest=item.t-15000;
+      while(left<right){
+        const mid=(left+right)>>1;
+        if(other[mid].t<earliest)left=mid+1;else right=mid;
+      }
+      let match=false;
+      for(let i=left;i<other.length && other[i].t<=item.t+15000;i++) {
+        if(Math.abs(other[i].temperature-item.temperature)<0.001){match=true;break;}
+      }
+      return y(item.temperature)+(match?(side==='A'?-2.5:2.5):0);
+    }
+    function drawSeries(series,side){
+      if(!series.length)return;
+      ctx.strokeStyle=COLORS[side];ctx.lineWidth=2.5;ctx.lineJoin='round';ctx.lineCap='round';
+      for(let i=1;i<series.length;i++){
+        const prev=series[i-1],cur=series[i];
+        ctx.setLineDash(cur.t-prev.t>GAP_MS?[5,5]:[]);
+        ctx.beginPath();ctx.moveTo(x(prev.t),displayY(prev,side));
+        ctx.lineTo(x(cur.t),displayY(cur,side));ctx.stroke();
+      }
+      ctx.setLineDash([]);ctx.fillStyle=COLORS[side];
+      // Keep every line segment; thin only the point markers for dense experiments.
+      const markerSkip=Math.max(1,Math.ceil(series.length/120));
+      for(let i=0;i<series.length;i+=markerSkip){
+        const r=series[i];ctx.beginPath();ctx.arc(x(r.t),displayY(r,side),2.2,0,2*Math.PI);ctx.fill();
+      }
+      if(series.length>1){const r=series[series.length-1];ctx.beginPath();ctx.arc(x(r.t),displayY(r,side),2.2,0,2*Math.PI);ctx.fill();}
+    }
+    drawSeries(a,'A');drawSeries(b,'B');
+    summary.textContent=`${fmtTime(tMin)} ~ ${fmtTime(tMax)} · A ${fmtCount(a.length)}건 / B ${fmtCount(b.length)}건`;
+  }
+  function render() {
+    $('experiment-name').textContent=state.name||'실험 확인 중';
+    $('class-label').textContent=state.classLabel||'—';
+    const latest=Object.values(state.latest).map(x=>x.t);
+    $('last-measured-at').textContent=latest.length?fmtTime(Math.max(...latest)):'—';
+    drawCards();drawChart();
+  }
+  async function refreshData() {
+    if (state.busy || !SESSION_ID) return;
+    state.busy=true;
+    const initial=!state.hasEverLoaded;
+    setStatus(initial?'측정값 불러오는 중':'새 데이터 확인 중');
+    try{
+      let loops=0;
+      while(loops++<200){
+        const chunk=await callServer('getSessionChunk',SESSION_ID,state.nextRow);
+        if(!chunk || !chunk.ok || chunk.sessionId!==SESSION_ID)throw new Error('응답 형식이 올바르지 않습니다.');
+        if(chunk.nextRow<state.nextRow)throw new Error('조회 위치가 역행했습니다.');
+        for(const item of chunk.records||[])collect(item);
+        state.nextRow=chunk.nextRow;
+        state.checkedAt=Date.now();
+        state.hasEverLoaded=true;
+        render();
+        if(!chunk.hasMore)break;
+        setStatus('이전 기록 불러오는 중');
+        info(`기존 측정 기록을 읽고 있습니다. (${fmtCount(Math.max(0,state.nextRow-2))}/${fmtCount(Math.max(0,chunk.lastRow-1))}행 확인)`);
+      }
+      if(loops>200) info('조회량이 많아 나머지 기록은 다음 새로고침에서 이어서 읽습니다.');
+      else if(!state.rows.size) info('해당 실험 ID에 업로드된 측정값이 아직 없습니다. 교사용 사이트에서 시트 동기화를 확인해 주세요.');
+      else info(`구글 시트에서 ${fmtCount(state.rows.size)}개의 측정값을 조회했습니다. 시트 동기화 후 20초 간격으로 갱신됩니다.`);
+      setStatus('조회 중','ready');
+    } catch(err) {
+      const msg=err && err.message?err.message:String(err);
+      setStatus('조회 오류','error');info('데이터 조회 실패: '+msg,true);
+    } finally {
+      state.busy=false;
+      render();
+    }
+  }
+  let resizeTimer;
+  window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(drawChart,130);});
+  drawCards();drawChart();
+  if(!SESSION_ID){
+    setStatus('링크 확인 필요','error');
+    $('experiment-name').textContent='실험 ID 없음';
+    $('chart-empty').textContent='교사가 전달한 실험별 공유 링크로 접속해 주세요.';
+    info('이 페이지는 실험별 전용 링크로만 조회할 수 있습니다.',true);
+  }else{
+    refreshData();
+    state.timer=setInterval(()=>{if(!document.hidden)refreshData();},POLL_MS);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshData();});
+  }
+})();
+</script>
