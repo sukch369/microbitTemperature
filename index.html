@@ -44,10 +44,17 @@
         <div class="stat"><span>시트 동기화 완료</span><strong id="stat-synced">0</strong></div>
         <div class="stat"><span>동기화 대기</span><strong id="stat-pending">0</strong></div>
         <div class="stat"><span>최근 시리얼 수신</span><strong class="stat-time" id="stat-last">—</strong></div>
+        <div class="stat"><span>의심값 보류</span><strong id="stat-anomalies">0</strong></div>
       </section>
       <section class="panel"><div class="panel-head"><div><h2>모둠별 최근 온도</h2><p class="muted small">모둠을 선택하면 아래 그래프가 변경됩니다.</p></div><span class="muted small" id="local-last-updated"></span></div><div id="local-groups" class="group-grid"></div></section>
       <section class="panel chart-panel"><div class="panel-head"><div><h2 id="local-chart-title">1모둠 온도 변화</h2><p class="muted small">최대 최근 200개 데이터 표시 · 각 모둠 A/B 비교</p></div><div class="legend"><span><i class="dot a"></i>A</span><span><i class="dot b"></i>B</span></div></div><div class="chart-wrap"><canvas id="local-chart" aria-label="선택한 모둠의 온도 그래프" role="img"></canvas></div><div id="local-chart-empty" class="empty hidden">해당 모둠의 데이터가 아직 없습니다.</div></section>
       <section class="panel"><div class="panel-head"><div><h2>데이터 관리</h2><p class="muted small">로컬 저장은 자동이며, 업로드는 성공 확인 후 완료로 처리됩니다.</p></div><span id="sync-status" class="chip light">서버 미설정</span></div><div class="actions"><button type="button" class="btn primary" id="sync-now">구글 시트 동기화</button><button type="button" class="btn secondary" id="export-csv">현재 실험 CSV 백업</button><button type="button" class="btn secondary" id="storage-persist">로컬 저장 보호 요청</button><button type="button" class="btn secondary danger" id="delete-session">현재 실험 로컬 기록 삭제</button></div><p class="hint">업로드가 실패하거나 인터넷이 끊겨도 기존 기록은 이 PC의 IndexedDB에 남습니다. 이 컴퓨터의 사이트 데이터를 삭제하면 기록도 사라질 수 있으므로 CSV 백업을 권장합니다.</p></section>
+      <section class="panel"><div class="panel-head"><div><h2>시리얼 원본 진단</h2><p class="muted small">교사용 마이크로비트의 REQ / RX / DATA / MISS를 원문 그대로 확인합니다.</p></div><button type="button" class="btn secondary" id="copy-serial-log">원본 로그 복사</button></div>
+        <label class="quality-toggle"><input type="checkbox" id="quality-protection" checked> <strong>급격한 온도 변화 검증</strong> — 같은 장치의 이전 정상값과 3분 이내 10℃ 넘게 차이 나면 첫 값은 보류합니다. 다음 값에서도 비슷한 온도가 확인되면 정상 측정으로 인정합니다. 빠르게 온도를 변화시키는 실험은 체크를 해제하세요.</label>
+        <pre id="serial-log" class="serial-console" aria-live="off">USB 시리얼 연결 후 원본 메시지가 표시됩니다.</pre>
+        <div class="actions"><button type="button" class="btn secondary" id="export-anomalies">보류 기록 CSV 다운로드</button></div>
+        <p class="hint">보류된 값은 원본과 함께 PC IndexedDB에 기록되며 일반 그래프와 구글 시트 동기화에서는 제외됩니다. 이미 저장된 과거 값은 자동 삭제되지 않습니다.</p>
+      </section>
       <section class="panel"><div class="panel-head"><h2>최근 수신 기록</h2><span class="muted small">최근 20건</span></div><div class="table-scroll"><table><thead><tr><th>수신 시각</th><th>장치</th><th>온도(°C)</th><th>스프레드시트</th></tr></thead><tbody id="local-history"><tr><td colspan="4">수집된 데이터가 없습니다.</td></tr></tbody></table></div></section>
     </section>
     <section id="share-view" class="hidden">
@@ -58,6 +65,6 @@
       <section class="panel"><div class="panel-head"><h2>최근 공유 데이터</h2><span class="muted small">선택한 모둠</span></div><div class="table-scroll"><table><thead><tr><th>수신 시각</th><th>장치</th><th>온도(°C)</th></tr></thead><tbody id="cloud-history"><tr><td colspan="3">조회된 데이터가 없습니다.</td></tr></tbody></table></div></section>
     </section>
   </main>
-  <footer class="container footer">마이크로비트 온도 탐구실 · Web Serial / IndexedDB / Google Apps Script <span id="footer-version">v1.0</span></footer>
+  <footer class="container footer">마이크로비트 온도 탐구실 · Web Serial / IndexedDB / Google Apps Script <span id="footer-version">v1.1</span></footer>
 </body>
 </html>

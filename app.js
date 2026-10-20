@@ -1,10 +1,10 @@
 /* micro:bit classroom dashboard (static GitHub Pages client) */
 (() => {
   "use strict";
-  const C = Object.assign({gasUrl:"",baudRate:115200,syncIntervalMs:30000,viewerIntervalMs:20000}, window.APP_CONFIG || {});
+  const C = Object.assign({gasUrl:"",baudRate:115200,syncIntervalMs:30000,viewerIntervalMs:20000,temperatureJumpLimitC:10,temperatureJumpWindowMs:180000,temperatureConfirmToleranceC:3}, window.APP_CONFIG || {});
   const $ = id => document.getElementById(id);
   const DEVICES = Array.from({length:6}, (_,i) => [String(i+1)+'A',String(i+1)+'B']).flat();
-  const STATE = { db:null, session:null, localRecords:[], localGroup:1, cloudGroup:1, cloudData:[], cloudSummary:{}, port:null, reader:null, reading:false, syncing:false, refreshing:false, refreshAgain:false, lastReceive:0, misses:0, renderScheduled:false, jsonpSeq:0 };
+  const STATE = { db:null, session:null, localRecords:[], localGroup:1, cloudGroup:1, cloudData:[], cloudSummary:{}, port:null, reader:null, reading:false, syncing:false, refreshing:false, refreshAgain:false, lastReceive:0, misses:0, renderScheduled:false, jsonpSeq:0, qualityProtection:true, lastGood:{}, pendingSuspect:{}, serialLines:[], anomalyCount:0 };
   let refreshTimer, syncTimer, serialTask;
 
   const now = () => new Date().toISOString();
@@ -23,12 +23,16 @@
   function txDone(tx){return new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('DB transaction aborted'));});}
   async function openDB(){
     return await new Promise((resolve,reject)=>{
-      const r=indexedDB.open('microbit-temperature-dashboard',1);
+      const r=indexedDB.open('microbit-temperature-dashboard',2);
       r.onupgradeneeded=()=>{
         const db=r.result;
         if(!db.objectStoreNames.contains('sessions'))db.createObjectStore('sessions',{keyPath:'id'});
         if(!db.objectStoreNames.contains('readings')){
           const s=db.createObjectStore('readings',{keyPath:'id'});
+          s.createIndex('sessionId','sessionId',{unique:false});
+        }
+        if(!db.objectStoreNames.contains('anomalies')){
+          const s=db.createObjectStore('anomalies',{keyPath:'id'});
           s.createIndex('sessionId','sessionId',{unique:false});
         }
       };
@@ -42,6 +46,18 @@
     return await req(STATE.db.transaction('readings').objectStore('readings').index('sessionId').getAll(IDBKeyRange.only(id)));
   }
   async function allReadings(){return await req(STATE.db.transaction('readings').objectStore('readings').getAll());}
+  async function getSessionAnomalies(id){return await req(STATE.db.transaction('anomalies').objectStore('anomalies').index('sessionId').getAll(IDBKeyRange.only(id)));}
+  async function saveAnomaly(deviceId,temperature,reason,raw){
+    const entry={id:uid(),sessionId:STATE.session.id,deviceId,temperature,reason,raw,measuredAt:now()};
+    const tx=STATE.db.transaction('anomalies','readwrite');tx.objectStore('anomalies').put(entry);await txDone(tx);
+    STATE.anomalyCount++;$('stat-anomalies').textContent=STATE.anomalyCount.toLocaleString('ko-KR');
+    addSerialLog('⚠ 보류: '+reason);
+  }
+  function addSerialLog(line){
+    STATE.serialLines.push(stamp(now())+'  '+line);
+    if(STATE.serialLines.length>150)STATE.serialLines.shift();
+    const el=$('serial-log');if(el){el.textContent=STATE.serialLines.slice(-45).join('\n');el.scrollTop=el.scrollHeight;}
+  }
   async function insertReading(r){const tx=STATE.db.transaction('readings','readwrite');tx.objectStore('readings').put(r);await txDone(tx);}
   async function patchReadings(ids, changes){
     const tx=STATE.db.transaction('readings','readwrite'), store=tx.objectStore('readings');
@@ -53,8 +69,10 @@
   }
   async function removeSession(id){
     const records=await getSessionRecords(id);
-    const tx=STATE.db.transaction(['readings','sessions'],'readwrite');
+    const anomalies=await getSessionAnomalies(id);
+    const tx=STATE.db.transaction(['readings','sessions','anomalies'],'readwrite');
     for(const r of records)tx.objectStore('readings').delete(r.id);
+    for(const a of anomalies)tx.objectStore('anomalies').delete(a.id);
     tx.objectStore('sessions').delete(id);
     await txDone(tx);
   }
@@ -78,6 +96,10 @@
     $('experiment-name').value=s.name;$('class-label').value=s.classLabel;
     $('session-id-short').textContent=`실험 ID: ${s.id.slice(0,8)}...`;
     STATE.localRecords=(await getSessionRecords(s.id)).sort((a,b)=>a.measuredAt.localeCompare(b.measuredAt));
+    STATE.lastGood={};STATE.pendingSuspect={};
+    for(const r of STATE.localRecords){STATE.lastGood[r.deviceId]={temperature:r.temperature,at:Date.parse(r.measuredAt)};}
+    STATE.anomalyCount=(await getSessionAnomalies(s.id)).length;
+    $('stat-anomalies').textContent=STATE.anomalyCount.toLocaleString('ko-KR');
     await renderSessionOptions();renderLocal();
   }
   async function commitSession(){
@@ -165,10 +187,34 @@
     drawHistory('local-history',records,true);
   }
   function scheduleLocalRender(){if(STATE.renderScheduled)return;STATE.renderScheduled=true;setTimeout(()=>{STATE.renderScheduled=false;if(currentView()==='collect')renderLocal();},400);}
-  async function saveMeasurement(deviceId,temperature,deviceMs){
-    const g=Number(deviceId[0]),side=deviceId[1];if(g<1||g>6||!['A','B'].includes(side)||!Number.isFinite(temperature)||temperature< -100||temperature>150)return;
+  // 급격한 변화는 센서/실험 조건에 따라 진짜일 수도 있으므로 첫 번째 값만 보류합니다.
+  // 같은 큰 변동이 연속 두 차례 나타나면 정상적인 빠른 온도 변화로 판단하여 허용합니다.
+  function checkAnomaly(deviceId,temperature){
+    if(!STATE.qualityProtection)return null;
+    const last=STATE.lastGood[deviceId],t=Date.now();
+    if(!last||t-last.at>C.temperatureJumpWindowMs)return null;
+    const delta=Math.abs(temperature-last.temperature);
+    if(delta<=C.temperatureJumpLimitC){delete STATE.pendingSuspect[deviceId];return null;}
+    const pending=STATE.pendingSuspect[deviceId];
+    if(pending && t-pending.at<=C.temperatureJumpWindowMs &&
+       Math.abs(pending.temperature-temperature)<=C.temperatureConfirmToleranceC){
+      delete STATE.pendingSuspect[deviceId];
+      addSerialLog(`✓ 연속 확인: ${deviceId} ${temperature}°C (큰 온도 변화 확정)`);
+      return null;
+    }
+    STATE.pendingSuspect[deviceId]={temperature,at:t};
+    return `${deviceId} ${last.temperature}°C → ${temperature}°C (${delta.toFixed(1)}°C 변동)`;
+  }
+  async function saveMeasurement(deviceId,temperature,deviceMs,rawLine){
+    const g=Number(deviceId[0]),side=deviceId[1];
+    if(g<1||g>6||!['A','B'].includes(side)||!Number.isFinite(temperature)||temperature< -100||temperature>150){
+      await saveAnomaly(deviceId,temperature,'온도 범위 또는 장치 ID 오류',rawLine);return;
+    }
+    const reason=checkAnomaly(deviceId,temperature);
+    if(reason){await saveAnomaly(deviceId,temperature,reason,rawLine);return;}
     const r={id:uid(),sessionId:STATE.session.id,sessionName:STATE.session.name,classLabel:STATE.session.classLabel,deviceId,group:g,side,temperature,deviceMs,measuredAt:now(),syncState:'queued',batchId:null};
     await insertReading(r);STATE.lastReceive=Date.now();
+    STATE.lastGood[deviceId]={temperature,at:Date.now()};
     if(STATE.session.id===r.sessionId)STATE.localRecords.push(r);
     scheduleLocalRender();
   }
@@ -191,8 +237,9 @@
             if(buffer.length>10000)buffer=buffer.slice(-2000);
             let nl;while((nl=buffer.indexOf('\n'))!==-1){
               const line=buffer.slice(0,nl).replace(/\r/g,'');buffer=buffer.slice(nl+1);
+              addSerialLog(line);
               const result=parseSerialLine(line);
-              if(result?.kind==='DATA')await saveMeasurement(result.deviceId,result.temperature,result.deviceMs);
+              if(result?.kind==='DATA')await saveMeasurement(result.deviceId,result.temperature,result.deviceMs,line);
               else if(result?.kind==='MISS')STATE.misses++;
             }
           }
@@ -318,6 +365,24 @@
       try{await commitSession();const session=newSession();await saveSession(session);await selectSession(session.id);announce('새 실험을 생성했습니다.');}catch(err){failure(err);}
     });
     $('connect').addEventListener('click',()=>connectSerial().catch(failure));
+    $('quality-protection').addEventListener('change',e=>{
+      STATE.qualityProtection=e.target.checked;
+      STATE.pendingSuspect={};
+      announce(STATE.qualityProtection?'급격한 온도 변화 1회 검증을 켰습니다.':'급격한 온도 변화 검증을 해제했습니다. 급변 측정값도 모두 저장합니다.');
+    });
+    $('copy-serial-log').addEventListener('click',async()=>{
+      if(!STATE.serialLines.length){announce('복사할 로그가 없습니다.');return;}
+      await navigator.clipboard.writeText(STATE.serialLines.join('\n'));
+      announce('USB 원본 로그를 복사했습니다.');
+    });
+    $('export-anomalies').addEventListener('click',async()=>{
+      const list=await getSessionAnomalies(STATE.session.id);
+      if(!list.length){announce('현재 실험에 보류된 값이 없습니다.');return;}
+      const cells=[['수신시각','장치','수신 온도','보류 사유','원본 시리얼'],...list.map(x=>[x.measuredAt,x.deviceId,x.temperature,x.reason,x.raw])];
+      const csv='\ufeff'+cells.map(row=>row.map(csvCell).join(',')).join('\r\n');
+      const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+      const a=document.createElement('a');a.href=url;a.download=`이상값_점검_${STATE.session.id.slice(0,8)}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+    });
     $('disconnect').addEventListener('click',()=>disconnectSerial().catch(failure));
     $('sync-now').addEventListener('click',()=>syncNow().catch(failure));
     $('copy-link').addEventListener('click',()=>copyUrl().catch(failure));
