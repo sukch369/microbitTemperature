@@ -1,4 +1,5 @@
 # 마이크로비트 6모둠 온도 탐구실
+https://sukch369.github.io/microbitTemperature/
 
 **버전 1.1 / GitHub Pages + Web Serial + IndexedDB + Google Apps Script + Google Sheets**
 
