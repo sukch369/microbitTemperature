@@ -11,9 +11,9 @@
   const uid = () => crypto.randomUUID();
   const delay = ms => new Promise(resolve => setTimeout(resolve,ms));
   const configured = () => /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec(?:\?.*)?$/.test((C.gasUrl || '').trim());
-  const stamp = value => {if(!value) return '—'; const d = new Date(value); return Number.isNaN(d.valueOf())?'—':d.toLocaleTimeString('ko-KR',{hour12:false});};
+  const stamp = value => {if(value===null || value===undefined || value==='') return '—'; const d=new Date(value);if(Number.isNaN(d.valueOf()))return '—';return [d.getHours(),d.getMinutes(),d.getSeconds()].map(x=>String(x).padStart(2,'0')).join(':');};
   const fullStamp = value => {if(!value) return '—';const d=new Date(value);return Number.isNaN(d.valueOf())?'—':d.toLocaleString('ko-KR',{hour12:false});};
-  const fixedTemp = v => Number.isFinite(Number(v)) ? `${Number(v).toFixed(1)}` : '—';
+  const fixedTemp = v => v !== null && v !== undefined && Number.isFinite(Number(v)) ? String(Math.round(Number(v))) : '—';
   function announce(message, error=false) {
     const el=$('notice'); el.textContent=message;el.classList.remove('hidden');el.classList.toggle('error',error);
     clearTimeout(announce.timer);announce.timer=setTimeout(()=>el.classList.add('hidden'),8500);
@@ -95,6 +95,7 @@
     STATE.session=s;localStorage.setItem('microbit_active_session',s.id);
     $('experiment-name').value=s.name;$('class-label').value=s.classLabel;
     $('session-id-short').textContent=`실험 ID: ${s.id.slice(0,8)}...`;
+    $('active-experiment-name').textContent=s.name;
     STATE.localRecords=(await getSessionRecords(s.id)).sort((a,b)=>a.measuredAt.localeCompare(b.measuredAt));
     STATE.lastGood={};STATE.pendingSuspect={};
     for(const r of STATE.localRecords){STATE.lastGood[r.deviceId]={temperature:r.temperature,at:Date.parse(r.measuredAt)};}
@@ -106,21 +107,21 @@
     const name=$('experiment-name').value.trim();
     if(!name)throw Error('실험 이름을 입력하세요.');
     STATE.session.name=name;STATE.session.classLabel=$('class-label').value.trim();
-    await saveSession(STATE.session);await renderSessionOptions();announce('실험 정보를 저장했습니다.');
-  }
-  function getShareUrl(){
-    const url=new URL(location.href);
-    url.search='';url.searchParams.set('view','share');url.searchParams.set('session',STATE.session.id);url.searchParams.set('group',String(STATE.localGroup));return url.href;
+    await saveSession(STATE.session);await renderSessionOptions();
+    $('active-experiment-name').textContent=STATE.session.name;
+    announce('실험 정보를 저장했습니다.');
   }
   async function copyUrl(){
     await commitSession();
-    const url=getShareUrl();await navigator.clipboard.writeText(url);
-    announce('공유 링크를 복사했습니다. 구글 시트에 업로드된 데이터만 공유됩니다.');
+    await navigator.clipboard.writeText(STATE.session.id);
+    announce('실험 ID를 복사했습니다. 학생용 Apps Script 전용 공유 링크는 다음 단계에서 연결됩니다.');
   }
   function currentView(){return $('collect-view').classList.contains('hidden')?'share':'collect';}
   function showView(view, updateUrl=true){
     const shared=view==='share';$('collect-view').classList.toggle('hidden',shared);$('share-view').classList.toggle('hidden',!shared);
-    $('tab-collect').classList.toggle('active',!shared);$('tab-share').classList.toggle('active',shared);
+    // v1.2 교사용 화면에서 탭 메뉴 제거. 기존 ?view=share 링크는 전환 기간에만 유지.
+    $('tab-collect')?.classList.toggle('active',!shared);
+    $('tab-share')?.classList.toggle('active',shared);
     if(shared){
       if(!$('viewer-session').value.trim() && STATE.session)$('viewer-session').value=STATE.session.id;
       if(updateUrl){const u=new URL(location.href);u.searchParams.set('view','share');u.searchParams.set('session',$('viewer-session').value.trim());u.searchParams.set('group',String(STATE.cloudGroup));history.replaceState({},'',u);}
@@ -151,27 +152,80 @@
       for(const v of parts){const td=document.createElement('td');td.textContent=v;tr.append(td);}tbody.append(tr);
     }
   }
+  // 전체 수집 기간을 표시합니다. y축은 정수 눈금만 사용합니다.
   function chart(canvasId, records, group){
     const canvas=$(canvasId),ctx=canvas.getContext('2d');
     const width=Math.max(canvas.clientWidth,200),height=Math.max(canvas.clientHeight,200);
-    const dpr=window.devicePixelRatio||1;canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);
-    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,width,height);
-    const pts=records.filter(r=>r.group===group && Number.isFinite(Number(r.temperature))).sort((a,b)=>a.measuredAt.localeCompare(b.measuredAt)).slice(-200);
+    const dpr=window.devicePixelRatio||1;
+    canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,width,height);
+    const pts=records.filter(r=>r.group===group &&
+      Number.isFinite(Number(r.temperature)) && Number.isFinite(Date.parse(r.measuredAt)))
+      .sort((a,b)=>a.measuredAt.localeCompare(b.measuredAt));
     $(canvasId+'-empty').classList.toggle('hidden',pts.length!==0);
-    const pad={left:51,right:16,top:17,bottom:36};const plotW=width-pad.left-pad.right,plotH=height-pad.top-pad.bottom;
-    const values=pts.map(r=>Number(r.temperature));let lo=values.length?Math.min(...values):20,hi=values.length?Math.max(...values):30;
-    if(Math.abs(hi-lo)<1){lo-=1;hi+=1;}else{const extra=(hi-lo)*.18;lo-=extra;hi+=extra;}
-    const times=pts.map(r=>Date.parse(r.measuredAt));let tmin=times.length?Math.min(...times):Date.now(),tmax=times.length?Math.max(...times):Date.now()+1000;if(tmax===tmin)tmax+=1000;
+    const pad={left:49,right:15,top:17,bottom:40};
+    const plotW=Math.max(1,width-pad.left-pad.right),plotH=Math.max(1,height-pad.top-pad.bottom);
+    if(!pts.length){
+      ctx.fillStyle='#7b8c97';ctx.font='13px system-ui';ctx.textAlign='center';
+      ctx.fillText('측정 대기 중',width/2,height/2);
+      return;
+    }
+    // min/max는 spread( ...values )를 피하여 장시간 실험에서도 안전하게 계산합니다.
+    let minV=Infinity,maxV=-Infinity,tmin=Infinity,tmax=-Infinity;
+    for(const p of pts){
+      const temp=Number(p.temperature),time=Date.parse(p.measuredAt);
+      minV=Math.min(minV,temp);maxV=Math.max(maxV,temp);
+      tmin=Math.min(tmin,time);tmax=Math.max(tmax,time);
+    }
+    const magnitude=Math.max(1,Math.ceil((maxV-minV+2)/6));
+    const scale=Math.pow(10,Math.floor(Math.log10(magnitude)));
+    const normalized=magnitude/scale;
+    const step=normalized<=1?scale:normalized<=2?2*scale:normalized<=5?5*scale:10*scale;
+    const minTick=Math.floor((minV-1)/step)*step,maxTick=Math.ceil((maxV+1)/step)*step;
+    const lo=minTick,hi=Math.max(maxTick,minTick+step);
+    // 한 점뿐일 때에도 중앙에 표시하고 시간 레이블을 명확히 합니다.
+    const oneInstant=tmax===tmin;
+    if(oneInstant){tmin-=30000;tmax+=30000;}
     const x=t=>pad.left+(t-tmin)/(tmax-tmin)*plotW;
     const y=v=>pad.top+(hi-v)/(hi-lo)*plotH;
     ctx.font='12px system-ui';ctx.fillStyle='#718592';ctx.textAlign='right';ctx.textBaseline='middle';
-    for(let i=0;i<=4;i++){const v=lo+(hi-lo)*i/4,py=y(v);ctx.strokeStyle='#e3eaed';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pad.left,py);ctx.lineTo(width-pad.right,py);ctx.stroke();ctx.fillText(v.toFixed(1),pad.left-9,py);}
+    for(let tick=lo;tick<=hi+step/10;tick+=step){
+      const py=y(tick);
+      ctx.strokeStyle='#e3eaed';ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(pad.left,py);ctx.lineTo(width-pad.right,py);ctx.stroke();
+      ctx.fillText(String(Math.round(tick)),pad.left-9,py);
+    }
     ctx.textAlign='center';ctx.textBaseline='top';
-    for(let i=0;i<=4;i++){let tt=tmin+(tmax-tmin)*i/4;ctx.fillText(stamp(tt),x(tt),height-pad.bottom+11);}
+    const tickCount=width<450?2:4;
+    for(let i=0;i<=tickCount;i++){
+      const tt=tmin+(tmax-tmin)*i/tickCount;
+      ctx.fillText(stamp(tt),x(tt),height-pad.bottom+12);
+    }
     for(const [side,color] of [['A','#098e95'],['B','#e58b3c']]){
-      const subset=pts.filter(r=>r.side===side);ctx.strokeStyle=color;ctx.lineWidth=2.6;ctx.lineJoin='round';ctx.beginPath();
-      subset.forEach((r,i)=>{const px=x(Date.parse(r.measuredAt)),py=y(Number(r.temperature));if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);});ctx.stroke();
-      for(const r of subset.slice(-30)){ctx.fillStyle=color;ctx.beginPath();ctx.arc(x(Date.parse(r.measuredAt)),y(Number(r.temperature)),2.4,0,Math.PI*2);ctx.fill();}
+      const subset=pts.filter(r=>r.side===side);
+      if(!subset.length)continue;
+      ctx.save();ctx.beginPath();ctx.rect(pad.left-2,pad.top-3,plotW+4,plotH+6);ctx.clip();
+      ctx.strokeStyle=color;ctx.lineWidth=2.6;ctx.lineJoin='round';
+      ctx.beginPath();
+      let previousTime=null;
+      for(const r of subset){
+        const time=Date.parse(r.measuredAt),px=x(time),py=y(Number(r.temperature));
+        // 20초 기본 수집 주기에서 누락된 1회 이상의 구간은 잇지 않습니다.
+        if(previousTime===null || time-previousTime>35000)ctx.moveTo(px,py);
+        else ctx.lineTo(px,py);
+        previousTime=time;
+      }
+      ctx.stroke();
+      // 긴 실험은 점 표식 수만 제한하고 선의 전체 기간 데이터는 모두 표시합니다.
+      const markEvery=Math.max(1,Math.ceil(subset.length/300));
+      for(let i=0;i<subset.length;i+=markEvery){
+        const r=subset[i];ctx.fillStyle=color;ctx.beginPath();
+        ctx.arc(x(Date.parse(r.measuredAt)),y(Number(r.temperature)),2.2,0,Math.PI*2);ctx.fill();
+      }
+      const last=subset[subset.length-1];ctx.fillStyle=color;ctx.beginPath();
+      ctx.arc(x(Date.parse(last.measuredAt)),y(Number(last.temperature)),2.8,0,Math.PI*2);ctx.fill();
+      ctx.restore();
     }
   }
   function renderLocal(){
@@ -203,7 +257,7 @@
       return null;
     }
     STATE.pendingSuspect[deviceId]={temperature,at:t};
-    return `${deviceId} ${last.temperature}°C → ${temperature}°C (${delta.toFixed(1)}°C 변동)`;
+    return `${deviceId} ${fixedTemp(last.temperature)}°C → ${fixedTemp(temperature)}°C (${fixedTemp(delta)}°C 변동)`;
   }
   async function saveMeasurement(deviceId,temperature,deviceMs,rawLine){
     const g=Number(deviceId[0]),side=deviceId[1];
@@ -356,8 +410,7 @@
     a.href=url;a.download=`온도측정_${STATE.session.id.slice(0,8)}.csv`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
   }
   function bind(){
-    $('tab-collect').addEventListener('click',()=>showView('collect'));
-    $('tab-share').addEventListener('click',()=>showView('share'));
+    // 교사용 사이트의 공개 탭은 제거했습니다. 기존 공유 URL은 임시 유지합니다.
     $('local-sessions').addEventListener('change',e=>selectSession(e.target.value).catch(failure));
     $('save-details').addEventListener('click',()=>commitSession().catch(failure));
     $('new-experiment').addEventListener('click',async()=>{

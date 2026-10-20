@@ -6,56 +6,71 @@
   <meta name="theme-color" content="#132d40">
   <meta name="description" content="마이크로비트 6모둠 온도 측정과 공유 대시보드">
   <title>마이크로비트 온도 탐구실</title>
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=1.2.0">
   <script src="./config.js"></script>
-  <script defer src="./app.js"></script>
+  <script defer src="./app.js?v=1.2.0"></script>
 </head>
 <body>
   <header class="site-header">
     <div class="container header-inner">
       <div class="brand"><span class="brand-symbol">°</span><div><strong>마이크로비트 온도 탐구실</strong><small>6모둠 · 12개 센서 · 실시간 데이터</small></div></div>
-      <nav class="nav" aria-label="메뉴">
-        <button type="button" class="tab active" id="tab-collect">교사용 수집</button>
-        <button type="button" class="tab" id="tab-share">데이터 공유</button>
-      </nav>
+      <span class="header-label">교사용 · 측정 대시보드</span>
     </div>
   </header>
   <main class="container">
     <div id="notice" class="notice hidden" role="status"></div>
     <section id="collect-view">
-      <div class="hero"><div><span class="eyebrow">LIVE EXPERIMENT</span><h1>교사용 측정 화면</h1><p>교사용 마이크로비트에서 수신한 데이터를 브라우저에 보관하고, 구글 시트로 동기화합니다.</p></div><span class="chip" id="serial-badge">USB 연결 대기</span></div>
-      <section class="panel setup-panel" aria-labelledby="setup-title"><div class="panel-head"><h2 id="setup-title">실험 정보</h2><span class="muted small" id="session-id-short"></span></div>
-        <div class="setup-grid">
-          <label>실험 이름<input id="experiment-name" type="text" maxlength="70" placeholder="예: 물의 온도 변화 탐구"></label>
-          <label>교사/교실 구분(개인정보 제외)<input id="class-label" type="text" maxlength="50" placeholder="예: 과학실 A"></label>
-          <label>이전 실험 불러오기<select id="local-sessions"><option value="">불러오는 중...</option></select></label>
-          <button type="button" class="btn secondary" id="new-experiment">+ 새 실험 시작</button>
+      <div class="hero hero-compact">
+        <div><span class="eyebrow">LIVE EXPERIMENT</span><h1>실시간 온도 측정</h1>
+          <p><strong id="active-experiment-name">온도 변화 탐구</strong> · 6모둠 / 12개 센서</p></div>
+        <span class="chip" id="serial-badge">USB 연결 대기</span>
+      </div>
+
+      <section class="panel monitor-panel" aria-labelledby="groups-title">
+        <div class="panel-head"><div><h2 id="groups-title">전체 모둠 온도 현황</h2><p class="muted small">모둠을 클릭하면 아래 그래프가 변경됩니다. 마지막 정상 수신값을 표시합니다.</p></div><span class="muted small" id="local-last-updated"></span></div>
+        <div id="local-groups" class="group-grid"></div>
+      </section>
+      <section class="panel chart-panel" aria-labelledby="local-chart-title">
+        <div class="panel-head"><div><h2 id="local-chart-title">1모둠 온도 변화</h2><p class="muted small">실험 첫 측정부터 현재까지 전체 시간 · 세로축 정수 온도(℃)</p></div><div class="legend"><span><i class="dot a"></i>A</span><span><i class="dot b"></i>B</span></div></div>
+        <div class="chart-wrap"><canvas id="local-chart" aria-label="선택한 모둠의 전체 측정 기간 온도 그래프" role="img"></canvas></div>
+        <div id="local-chart-empty" class="empty hidden">해당 모둠의 데이터가 아직 없습니다.</div>
+      </section>
+
+      <details class="manage-disclosure" id="data-management">
+        <summary><span class="manage-title"><span aria-hidden="true">⚙</span> 데이터 관리 및 실험 설정</span><span class="muted manage-summary">실험 설정 · USB 연결 · 저장/동기화 · 원본 진단</span><span class="manage-caret" aria-hidden="true">⌄</span></summary>
+        <div class="manage-content">
+          <section class="panel setup-panel" aria-labelledby="setup-title"><div class="panel-head"><h2 id="setup-title">실험 정보 및 USB 연결</h2><span class="muted small" id="session-id-short"></span></div>
+            <div class="setup-grid">
+              <label>실험 이름<input id="experiment-name" type="text" maxlength="70" placeholder="예: 물의 온도 변화 탐구"></label>
+              <label>교사/교실 구분(개인정보 제외)<input id="class-label" type="text" maxlength="50" placeholder="예: 과학실 A"></label>
+              <label>이전 실험 불러오기<select id="local-sessions"><option value="">불러오는 중...</option></select></label>
+              <button type="button" class="btn secondary" id="new-experiment">+ 새 실험 시작</button>
+            </div>
+            <div class="actions">
+              <button type="button" class="btn primary" id="connect">USB 시리얼 연결</button>
+              <button type="button" class="btn secondary" id="disconnect" disabled>연결 해제</button>
+              <button type="button" class="btn secondary" id="save-details">실험 정보 저장</button>
+              <button type="button" class="btn secondary" id="copy-link">실험 ID 복사</button>
+            </div>
+            <p class="hint">PC 크롬/엣지에서 사용하세요. MakeCode 편집기 및 시리얼 콘솔의 WebUSB 연결을 해제한 후 교사용 마이크로비트를 선택하세요. 학생용 Apps Script 공유 링크 기능은 다음 단계에서 연결됩니다.</p>
+          </section>
+          <section class="stat-row" aria-label="데이터 저장 현황">
+            <div class="stat"><span>로컬 측정값</span><strong id="stat-total">0</strong></div>
+            <div class="stat"><span>시트 동기화 완료</span><strong id="stat-synced">0</strong></div>
+            <div class="stat"><span>동기화 대기</span><strong id="stat-pending">0</strong></div>
+            <div class="stat"><span>최근 시리얼 수신</span><strong class="stat-time" id="stat-last">—</strong></div>
+            <div class="stat"><span>의심값 보류</span><strong id="stat-anomalies">0</strong></div>
+          </section>
+          <section class="panel"><div class="panel-head"><div><h2>스프레드시트 동기화 및 백업</h2><p class="muted small">로컬 저장은 자동이며, 서버가 확인한 값만 동기화 완료로 처리합니다.</p></div><span id="sync-status" class="chip light">서버 미설정</span></div><div class="actions"><button type="button" class="btn primary" id="sync-now">구글 시트 동기화</button><button type="button" class="btn secondary" id="export-csv">현재 실험 CSV 백업</button><button type="button" class="btn secondary" id="storage-persist">로컬 저장 보호 요청</button><button type="button" class="btn secondary danger" id="delete-session">현재 실험 로컬 기록 삭제</button></div><p class="hint">인터넷 연결이 끊겨도 측정 기록은 이 PC의 IndexedDB에 저장됩니다. 브라우저의 사이트 데이터를 삭제하면 사라질 수 있으므로 CSV 백업을 권장합니다.</p></section>
+          <section class="panel"><div class="panel-head"><div><h2>시리얼 원본 진단</h2><p class="muted small">교사용 마이크로비트의 REQ / RX / DATA / MISS 메시지를 확인합니다.</p></div><button type="button" class="btn secondary" id="copy-serial-log">원본 로그 복사</button></div>
+            <label class="quality-toggle" for="quality-protection"><input type="checkbox" id="quality-protection" checked><span class="quality-copy"><strong>급격한 온도 변화 검증</strong><span class="muted quality-help">동일 장치의 이전 정상값에서 3분 이내 10℃ 넘게 달라지면 첫 값은 보류합니다. 다음 값도 비슷하면 정상으로 인정합니다. 실제로 온도를 급변시키는 수업이라면 체크를 해제하세요.</span></span></label>
+            <pre id="serial-log" class="serial-console" aria-live="off">USB 시리얼 연결 후 원본 메시지가 표시됩니다.</pre>
+            <div class="actions"><button type="button" class="btn secondary" id="export-anomalies">보류 기록 CSV 다운로드</button></div>
+            <p class="hint">보류된 값은 원본과 함께 PC IndexedDB에 기록되며, 그래프와 구글 시트 동기화에서는 제외됩니다. 기존 저장값은 자동 삭제되지 않습니다.</p>
+          </section>
+          <section class="panel"><div class="panel-head"><h2>최근 수신 기록</h2><span class="muted small">최근 20건</span></div><div class="table-scroll"><table><thead><tr><th>수신 시각</th><th>장치</th><th>온도(℃)</th><th>스프레드시트</th></tr></thead><tbody id="local-history"><tr><td colspan="4">수집된 데이터가 없습니다.</td></tr></tbody></table></div></section>
         </div>
-        <div class="actions">
-          <button type="button" class="btn primary" id="connect">USB 시리얼 연결</button>
-          <button type="button" class="btn secondary" id="disconnect" disabled>연결 해제</button>
-          <button type="button" class="btn secondary" id="save-details">실험 정보 저장</button>
-          <button type="button" class="btn secondary" id="copy-link">측정 결과 공유 링크 복사</button>
-        </div>
-        <p class="hint">크롬/엣지 PC에서 사용하세요. MakeCode의 시리얼 콘솔을 닫은 후 교사용 마이크로비트를 선택합니다. 다른 프로그램이 같은 포트를 열고 있으면 연결되지 않을 수 있습니다.</p>
-      </section>
-      <section class="stat-row" aria-label="저장 현황">
-        <div class="stat"><span>로컬 측정값</span><strong id="stat-total">0</strong></div>
-        <div class="stat"><span>시트 동기화 완료</span><strong id="stat-synced">0</strong></div>
-        <div class="stat"><span>동기화 대기</span><strong id="stat-pending">0</strong></div>
-        <div class="stat"><span>최근 시리얼 수신</span><strong class="stat-time" id="stat-last">—</strong></div>
-        <div class="stat"><span>의심값 보류</span><strong id="stat-anomalies">0</strong></div>
-      </section>
-      <section class="panel"><div class="panel-head"><div><h2>모둠별 최근 온도</h2><p class="muted small">모둠을 선택하면 아래 그래프가 변경됩니다.</p></div><span class="muted small" id="local-last-updated"></span></div><div id="local-groups" class="group-grid"></div></section>
-      <section class="panel chart-panel"><div class="panel-head"><div><h2 id="local-chart-title">1모둠 온도 변화</h2><p class="muted small">최대 최근 200개 데이터 표시 · 각 모둠 A/B 비교</p></div><div class="legend"><span><i class="dot a"></i>A</span><span><i class="dot b"></i>B</span></div></div><div class="chart-wrap"><canvas id="local-chart" aria-label="선택한 모둠의 온도 그래프" role="img"></canvas></div><div id="local-chart-empty" class="empty hidden">해당 모둠의 데이터가 아직 없습니다.</div></section>
-      <section class="panel"><div class="panel-head"><div><h2>데이터 관리</h2><p class="muted small">로컬 저장은 자동이며, 업로드는 성공 확인 후 완료로 처리됩니다.</p></div><span id="sync-status" class="chip light">서버 미설정</span></div><div class="actions"><button type="button" class="btn primary" id="sync-now">구글 시트 동기화</button><button type="button" class="btn secondary" id="export-csv">현재 실험 CSV 백업</button><button type="button" class="btn secondary" id="storage-persist">로컬 저장 보호 요청</button><button type="button" class="btn secondary danger" id="delete-session">현재 실험 로컬 기록 삭제</button></div><p class="hint">업로드가 실패하거나 인터넷이 끊겨도 기존 기록은 이 PC의 IndexedDB에 남습니다. 이 컴퓨터의 사이트 데이터를 삭제하면 기록도 사라질 수 있으므로 CSV 백업을 권장합니다.</p></section>
-      <section class="panel"><div class="panel-head"><div><h2>시리얼 원본 진단</h2><p class="muted small">교사용 마이크로비트의 REQ / RX / DATA / MISS를 원문 그대로 확인합니다.</p></div><button type="button" class="btn secondary" id="copy-serial-log">원본 로그 복사</button></div>
-        <label class="quality-toggle"><input type="checkbox" id="quality-protection" checked> <strong>급격한 온도 변화 검증</strong> — 같은 장치의 이전 정상값과 3분 이내 10℃ 넘게 차이 나면 첫 값은 보류합니다. 다음 값에서도 비슷한 온도가 확인되면 정상 측정으로 인정합니다. 빠르게 온도를 변화시키는 실험은 체크를 해제하세요.</label>
-        <pre id="serial-log" class="serial-console" aria-live="off">USB 시리얼 연결 후 원본 메시지가 표시됩니다.</pre>
-        <div class="actions"><button type="button" class="btn secondary" id="export-anomalies">보류 기록 CSV 다운로드</button></div>
-        <p class="hint">보류된 값은 원본과 함께 PC IndexedDB에 기록되며 일반 그래프와 구글 시트 동기화에서는 제외됩니다. 이미 저장된 과거 값은 자동 삭제되지 않습니다.</p>
-      </section>
-      <section class="panel"><div class="panel-head"><h2>최근 수신 기록</h2><span class="muted small">최근 20건</span></div><div class="table-scroll"><table><thead><tr><th>수신 시각</th><th>장치</th><th>온도(°C)</th><th>스프레드시트</th></tr></thead><tbody id="local-history"><tr><td colspan="4">수집된 데이터가 없습니다.</td></tr></tbody></table></div></section>
+      </details>
     </section>
     <section id="share-view" class="hidden">
       <div class="hero"><div><span class="eyebrow">SHARED RESULTS</span><h1>모둠별 데이터 공유</h1><p>구글 스프레드시트에 업로드된 측정값을 확인합니다. 마이크로비트 연결은 필요하지 않습니다.</p></div><span class="chip" id="viewer-badge">공유 데이터</span></div>
@@ -65,6 +80,6 @@
       <section class="panel"><div class="panel-head"><h2>최근 공유 데이터</h2><span class="muted small">선택한 모둠</span></div><div class="table-scroll"><table><thead><tr><th>수신 시각</th><th>장치</th><th>온도(°C)</th></tr></thead><tbody id="cloud-history"><tr><td colspan="3">조회된 데이터가 없습니다.</td></tr></tbody></table></div></section>
     </section>
   </main>
-  <footer class="container footer">마이크로비트 온도 탐구실 · Web Serial / IndexedDB / Google Apps Script <span id="footer-version">v1.1</span></footer>
+  <footer class="container footer">마이크로비트 온도 탐구실 · Web Serial / IndexedDB / Google Apps Script <span id="footer-version">v1.2</span></footer>
 </body>
 </html>
